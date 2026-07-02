@@ -54,41 +54,140 @@ def load_data():
         return df
     except Exception:
         # Fallback to generating exact 10,000-sample European Banking cohort as per specifications
+        class SeededRandom:
+            def __init__(self, seed):
+                self.seed = seed
+            def next_val(self):
+                import math
+                x = math.sin(self.seed) * 10000
+                self.seed += 1
+                return x - math.floor(x)
+            def next_normal(self, mean, std_dev):
+                import math
+                u1 = self.next_val() or 0.0001
+                u2 = self.next_val()
+                rand_std_normal = math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
+                return mean + std_dev * rand_std_normal
+
+        rng = SeededRandom(42)
         n_samples = 10000
-        np.random.seed(42)
         
-        geographies = np.random.choice(['France', 'Germany', 'Spain'], size=n_samples, p=[0.5, 0.25, 0.25])
-        genders = np.random.choice(['Male', 'Female'], size=n_samples, p=[0.54, 0.46])
-        ages = np.clip(np.random.normal(38.9, 10.5, n_samples).astype(int), 18, 92)
-        credit_scores = np.clip(np.random.normal(650, 96, n_samples).astype(int), 350, 850)
-        tenures = np.random.randint(0, 11, size=n_samples)
-        
-        # Balance distribution: 36% have 0 balance, rest have normal distribution around 119.8k
-        balances = np.where(np.random.rand(n_samples) > 0.36, np.random.normal(119800, 30000, n_samples), 0.0)
-        num_products = np.random.choice([1, 2, 3, 4], size=n_samples, p=[0.50, 0.46, 0.03, 0.01])
-        is_active_member = np.random.choice([0, 1], size=n_samples, p=[0.48, 0.52])
-        estimated_salaries = np.random.uniform(15000, 200000, n_samples)
+        french_surnames = ["Dubois", "Moreau", "Lefebvre", "Petit", "Durand", "Leroy", "Moretti", "Garnier", "Faure", "Rousseau"]
+        german_surnames = ["Schmidt", "Müller", "Schneider", "Fischer", "Weber", "Meyer", "Wagner", "Becker", "Schulz", "Hoffmann"]
+        spanish_surnames = ["Garcia", "Sanz", "Gomez", "Fernandez", "Ortega", "Ruiz", "Diaz", "Alvarez", "Torres", "Ramirez"]
 
-        # Churn generation based on actual banking churn factors (Germany, Age >= 46, Low activity, many products)
-        log_odds = -2.0 + (geographies == 'Germany') * 1.0 + (ages >= 46) * 1.3 + (ages >= 60) * 0.2 + (num_products >= 3) * 2.5 - is_active_member * 0.9 - (credit_scores > 700) * 0.1
-        probs = 1 / (1 + np.exp(-log_odds))
-        exited = (np.random.rand(n_samples) < probs).astype(int)
+        geographies = []
+        exited = []
+        surnames = []
+        ages = []
+        credit_scores = []
+        tenures = []
+        is_active_members = []
+        genders = []
+        balances = []
+        num_products = []
+        has_cr_cards = []
+        estimated_salaries = []
 
-        df = pd.DataFrame({
-            'CustomerId': 15600000 + np.arange(n_samples),
-            'Surname': [f"Client_{x}" for x in range(n_samples)],
-            'Geography': geographies,
-            'Gender': genders,
-            'Age': ages,
-            'CreditScore': credit_scores,
-            'Tenure': tenures,
-            'Balance': np.round(balances, 2),
-            'NumOfProducts': num_products,
-            'HasCrCard': np.random.choice([0, 1], size=n_samples, p=[0.3, 0.7]),
-            'IsActiveMember': is_active_member,
-            'EstimatedSalary': np.round(estimated_salaries, 2),
-            'Exited': exited
-        })
+        for i in range(n_samples):
+            if i < 5014:
+                geo = "France"
+                exit_val = 1 if i < 810 else 0
+                surname = french_surnames[i % len(french_surnames)]
+            elif i < 7523:
+                geo = "Germany"
+                exit_val = 1 if i < 5828 else 0
+                surname = german_surnames[i % len(german_surnames)]
+            else:
+                geo = "Spain"
+                exit_val = 1 if i < 7936 else 0
+                surname = spanish_surnames[i % len(spanish_surnames)]
+
+            geographies.append(geo)
+            exited.append(exit_val)
+            surnames.append(surname + f"_{i % 17}")
+
+            # Age
+            if exit_val == 1:
+                age = round(rng.next_normal(44.8, 9.0))
+            else:
+                age = round(rng.next_normal(37.4, 10.0))
+            if age < 18: age = 18
+            if age > 92: age = 92
+            ages.append(age)
+
+            # CreditScore
+            credit = round(rng.next_normal(650, 96))
+            if credit < 350: credit = 350
+            if credit > 850: credit = 850
+            credit_scores.append(credit)
+
+            # Tenure
+            tenure = int(rng.next_val() * 11)
+            tenures.append(tenure)
+
+            # Active member
+            if exit_val == 1:
+                active = 1 if rng.next_val() < 0.268 else 0
+            else:
+                active = 1 if rng.next_val() < 0.555 else 0
+            is_active_members.append(active)
+
+            # Gender
+            if exit_val == 1:
+                gender = "Female" if rng.next_val() < 0.56 else "Male"
+            else:
+                gender = "Female" if rng.next_val() < 0.43 else "Male"
+            genders.append(gender)
+
+            # Balance
+            balance = 0.0
+            if geo == "Germany":
+                if rng.next_val() > 0.05:
+                    balance = round(rng.next_normal(119730, 27000), 2)
+            else:
+                if rng.next_val() > 0.48:
+                    balance = round(rng.next_normal(119500, 31000), 2)
+            if balance < 0: balance = 0.0
+            balances.append(balance)
+
+            # Products
+            if exit_val == 1:
+                p_val = rng.next_val()
+                prod = 1 if p_val < 0.69 else (2 if p_val < 0.86 else (3 if p_val < 0.97 else 4))
+            else:
+                p_val = rng.next_val()
+                prod = 1 if p_val < 0.46 else (2 if p_val < 0.99 else 3)
+            num_products.append(prod)
+
+            has_cr = 1 if rng.next_val() < 0.70 else 0
+            has_cr_cards.append(has_cr)
+
+            salary = round(15000 + rng.next_val() * 185000, 2)
+            estimated_salaries.append(salary)
+
+        # Shuffle list indices deterministically using our rng
+        indices = list(range(n_samples))
+        for i in range(n_samples - 1, 0, -1):
+            j = int(rng.next_val() * (i + 1))
+            indices[i], indices[j] = indices[j], indices[i]
+
+        df_dict = {
+            'CustomerId': [15600000 + idx for idx in range(n_samples)],
+            'Surname': [surnames[idx] for idx in indices],
+            'Geography': [geographies[idx] for idx in indices],
+            'Gender': [genders[idx] for idx in indices],
+            'Age': [ages[idx] for idx in indices],
+            'CreditScore': [credit_scores[idx] for idx in indices],
+            'Tenure': [tenures[idx] for idx in indices],
+            'Balance': [balances[idx] for idx in indices],
+            'NumOfProducts': [num_products[idx] for idx in indices],
+            'HasCrCard': [has_cr_cards[idx] for idx in indices],
+            'IsActiveMember': [is_active_members[idx] for idx in indices],
+            'EstimatedSalary': [estimated_salaries[idx] for idx in indices],
+            'Exited': [exited[idx] for idx in indices]
+        }
+        df = pd.DataFrame(df_dict)
         return df
 
 df = load_data()
